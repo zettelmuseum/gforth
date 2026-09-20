@@ -1,3 +1,4 @@
+
 name: Gforth Android arm64 Release
 
 on:
@@ -45,16 +46,16 @@ jobs:
           echo "Using $ANDROID_DIR"
           cd "$ANDROID_DIR"
           chmod +x build.sh genlibs.sh gentoolchain.sh scale-icons.sh 2>/dev/null || true
-         ./gentoolchain.sh || echo "gentoolchain fallback to NDK llvm"
-         ./genlibs.sh arm64 ||./genlibs.sh aarch64 ||./genlibs.sh || true
+          ./gentoolchain.sh || echo "gentoolchain fallback"
+          ./genlibs.sh arm64 || ./genlibs.sh aarch64 || ./genlibs.sh || true
           export ARCH=arm64
           export ANDROID_ARCH=arm64-v8a
           export TARGET=aarch64-linux-android
           export API=21
-         ./build.sh release arm64 ||./build.sh arm64 release ||./build.sh || true
-          if [ -f./gradlew ]; then
-            chmod +x./gradlew
-           ./gradlew assembleRelease --no-daemon -PandroidArch=arm64-v8a -PabiFilter=arm64-v8a ||./gradlew assembleRelease --no-daemon || true
+          ./build.sh release arm64 || ./build.sh arm64 release || ./build.sh || true
+          if [ -f ./gradlew ]; then
+            chmod +x ./gradlew
+            ./gradlew assembleRelease --no-daemon -PandroidArch=arm64-v8a -PabiFilter=arm64-v8a || ./gradlew assembleRelease --no-daemon || true
           fi
           ls -R build/outputs/ app/build/outputs/ 2>/dev/null || true
 
