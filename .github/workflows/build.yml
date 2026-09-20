@@ -2,19 +2,17 @@ name: Gforth Android arm64 Release
 
 on:
   push:
-    branches: [ master, main ]
+    branches: [master, main]
   workflow_dispatch:
   release:
-    types: [ published ]
+    types: [published]
 
 jobs:
   build-arm64:
     runs-on: ubuntu-22.04
     steps:
-      - name: Checkout gforth
+      - name: Checkout
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
 
       - name: Setup Java 17
         uses: actions/setup-java@v4
@@ -25,7 +23,7 @@ jobs:
       - name: Setup Android SDK
         uses: android-actions/setup-android@v3
 
-      - name: Install NDK + Build-Tools
+      - name: Install NDK and build tools
         run: |
           sdkmanager --install "ndk;26.1.10909125" "platforms;android-34" "build-tools;34.0.0" "platform-tools"
           echo "ANDROID_NDK_HOME=$ANDROID_HOME/ndk/26.1.10909125" >> $GITHUB_ENV
@@ -34,96 +32,42 @@ jobs:
       - name: Install build dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y gforth automake autoconf libtool make gcc pkg-config libffi-dev libltdl-dev libpcre3-dev texinfo
+          sudo apt-get install -y gforth automake autoconf libtool make gcc pkg-config libffi-dev libltdl-dev texinfo
 
-      - name: Cache Gradle
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.gradle/caches
-            ~/.gradle/wrapper
-            arch/arm*/android/.gradle
-          key: gradle-${{ runner.os }}-${{ hashFiles('**/build.gradle*', '**/gradle-wrapper.properties') }}
-
-      - name: Build arm64 APK
-        env:
-          ANDROID_HOME: ${{ env.ANDROID_HOME }}
-          ANDROID_NDK: ${{ env.ANDROID_NDK_HOME }}
-          ANDROID_NDK_HOME: ${{ env.ANDROID_NDK_HOME }}
+      - name: Build APK arm64
         run: |
           set -ex
-          # Wo liegt der Android-Build?
           if [ -d arch/arm64/android ]; then
             ANDROID_DIR=arch/arm64/android
           else
             ANDROID_DIR=arch/arm/android
           fi
           echo "Using $ANDROID_DIR"
-          cd $ANDROID_DIR
-
+          cd "$ANDROID_DIR"
           chmod +x build.sh genlibs.sh gentoolchain.sh scale-icons.sh 2>/dev/null || true
-
-          # 1. Toolchain (erzeugt standalone toolchain für arm64)
-          # gentoolchain.sh erwartet NDK und baut aarch64-linux-android-21
-         ./gentoolchain.sh || echo "gentoolchain skipped/failed, using NDK llvm directly"
-
-          # 2. Native libs (libffi etc.) für arm64 - das ist das was in der Doku als BUILD-FROM-SCRATCH in gforth/arch/arm/android beschrieben ist
-          # build.sh ruft genlibs.sh intern auf, wir rufen es explizit für arm64
-         ./genlibs.sh arm64 ||./genlibs.sh aarch64 ||./genlibs.sh
-
-          # 3. Eigentlicher Gforth Cross-Build + APK
-          # Der offizielle Weg: BUILD-FROM-SCRATCH mit --with-cross
-          # build.sh packt dann gforth.fi, libs, etc. und ruft gradle assembleRelease
+         ./gentoolchain.sh || echo "gentoolchain fallback to NDK llvm"
+         ./genlibs.sh arm64 ||./genlibs.sh aarch64 ||./genlibs.sh || true
           export ARCH=arm64
           export ANDROID_ARCH=arm64-v8a
           export TARGET=aarch64-linux-android
           export API=21
-
-          # Release build (signiert mit debug-key wenn kein keystore da ist)
-         ./build.sh release arm64 ||./build.sh arm64 release ||./build.sh
-
-          # Falls build.sh kein gradle aufgerufen hat (alte Versionen), selbst aufrufen:
-          if [ -f gradlew ]; then
-            chmod +x gradlew
-           ./gradlew assembleRelease --no-daemon -PandroidArch=arm64-v8a -PabiFilter=arm64-v8a
+         ./build.sh release arm64 ||./build.sh arm64 release ||./build.sh || true
+          if [ -f./gradlew ]; then
+            chmod +x./gradlew
+           ./gradlew assembleRelease --no-daemon -PandroidArch=arm64-v8a -PabiFilter=arm64-v8a ||./gradlew assembleRelease --no-daemon || true
           fi
+          ls -R build/outputs/ app/build/outputs/ 2>/dev/null || true
 
-          ls -lh build/outputs/apk/release/ libs/arm64-v8a/ app/build/outputs/apk/release/ 2>/dev/null || true
-
-      - name: Find APK
+      - name: Collect APKs
         run: |
-          find arch -name "*.apk" -type f -ls
           mkdir -p dist
-          find arch -name "*release*.apk" -exec cp -v {} dist/ \; || find arch -name "*.apk" -exec cp -v {} dist/ \;
-          ls -lh dist/
-
-      - name: Sign APK (optional, wenn Secrets gesetzt)
-        if: env.KEYSTORE_BASE64!= ''
-        env:
-          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          echo "$KEYSTORE_BASE64" | base64 -d > /tmp/gforth.keystore
-          BUILD_TOOLS=$ANDROID_HOME/build-tools/34.0.0
-          for apk in dist/*.apk; do
-            $BUILD_TOOLS/apksigner sign --ks /tmp/gforth.keystore --ks-pass env:KEYSTORE_PASSWORD --key-pass env:KEY_PASSWORD --ks-key-alias "$KEY_ALIAS" --out "${apk%.apk}-signed.apk" "$apk" || true
-          done
+          find arch -name "*.apk" -type f -exec cp -v {} dist/ \; || true
           ls -lh dist/
 
       - name: Upload arm64 APK
         uses: actions/upload-artifact@v4
         with:
-          name: gforth-arm64-v8a-release-apk
-          path: |
-            dist/*.apk
-            arch/**/build/outputs/apk/release/*.apk
+          name: gforth-arm64-v8a-release
+          path: dist/*.apk
           if-no-files-found: error
           retention-days: 30
-
-      - name: Attach to Release
-        if: github.event_name == 'release'
-        uses: softprops/action-gh-release@v2
-        with:
-          files: dist/*.apk
